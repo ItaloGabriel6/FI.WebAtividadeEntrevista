@@ -1,11 +1,11 @@
 ﻿using FI.AtividadeEntrevista.BLL;
-using WebAtividadeEntrevista.Models;
+using FI.AtividadeEntrevista.DML;
+using FI.WebAtividadeEntrevista.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Web;
 using System.Web.Mvc;
-using FI.AtividadeEntrevista.DML;
+using WebAtividadeEntrevista.Models;
 
 namespace WebAtividadeEntrevista.Controllers
 {
@@ -15,7 +15,6 @@ namespace WebAtividadeEntrevista.Controllers
         {
             return View();
         }
-
 
         public ActionResult Incluir()
         {
@@ -38,7 +37,12 @@ namespace WebAtividadeEntrevista.Controllers
             }
             else
             {
-                
+                if (bo.VerificarExistencia(model.CPF))
+                {
+                    Response.StatusCode = 400;
+                    return Json("Já existe um cliente cadastrado com este CPF.");
+                }
+
                 model.Id = bo.Incluir(new Cliente()
                 {                    
                     CEP = model.CEP,
@@ -49,10 +53,25 @@ namespace WebAtividadeEntrevista.Controllers
                     Nacionalidade = model.Nacionalidade,
                     Nome = model.Nome,
                     Sobrenome = model.Sobrenome,
-                    Telefone = model.Telefone
+                    Telefone = model.Telefone,
+                    CPF = model.CPF
                 });
 
-           
+                if (model.Beneficiarios != null && model.Beneficiarios.Any())
+                {
+                    BoBeneficiario boBeneficiario = new BoBeneficiario();
+
+                    foreach (var benef in model.Beneficiarios)
+                    {
+                        boBeneficiario.Incluir(new Beneficiario()
+                        {
+                            CPF = benef.CPF,
+                            Nome = benef.Nome,
+                            IdCliente = model.Id
+                        });
+                    }
+                }
+
                 return Json("Cadastro efetuado com sucesso");
             }
         }
@@ -61,7 +80,7 @@ namespace WebAtividadeEntrevista.Controllers
         public JsonResult Alterar(ClienteModel model)
         {
             BoCliente bo = new BoCliente();
-       
+
             if (!this.ModelState.IsValid)
             {
                 List<string> erros = (from item in ModelState.Values
@@ -84,9 +103,45 @@ namespace WebAtividadeEntrevista.Controllers
                     Nacionalidade = model.Nacionalidade,
                     Nome = model.Nome,
                     Sobrenome = model.Sobrenome,
-                    Telefone = model.Telefone
+                    Telefone = model.Telefone,
+                    CPF = model.CPF
                 });
-                               
+
+                BoBeneficiario boBeneficiario = new BoBeneficiario();
+
+                var beneficiarioExistente = boBeneficiario.Consultar(model.Id);
+
+                var cpfsAtuais = model.Beneficiarios?.Select(b => b.CPF.Replace(".", "").Replace("-", "")).ToList() ?? new List<string>();
+
+                foreach (var antigo in beneficiarioExistente)
+                {
+                    if (!cpfsAtuais.Contains(antigo.CPF))
+                    {
+                        boBeneficiario.Excluir(antigo.CPF);
+                    }
+                }
+
+                if (model.Beneficiarios != null && model.Beneficiarios.Any())
+                {
+                    foreach (var beneficiarioModel in model.Beneficiarios)
+                    {
+                        var beneficiario = new FI.AtividadeEntrevista.DML.Beneficiario
+                        {
+                            Id = beneficiarioModel.Id,
+                            Nome = beneficiarioModel.Nome,
+                            CPF = beneficiarioModel.CPF,
+                            IdCliente = model.Id
+                        };
+
+                        bool existeCPFCadastrado = beneficiarioExistente.Exists(x => x.CPF == beneficiario.CPF);
+
+                        if (beneficiarioExistente != null && beneficiarioExistente.Any() && existeCPFCadastrado)
+                            boBeneficiario.Alterar(beneficiario);
+                        else
+                            boBeneficiario.Incluir(beneficiario);
+                    }
+                }
+
                 return Json("Cadastro alterado com sucesso");
             }
         }
@@ -111,10 +166,25 @@ namespace WebAtividadeEntrevista.Controllers
                     Nacionalidade = cliente.Nacionalidade,
                     Nome = cliente.Nome,
                     Sobrenome = cliente.Sobrenome,
-                    Telefone = cliente.Telefone
+                    Telefone = cliente.Telefone,
+                    CPF = cliente.CPF
                 };
 
-            
+                BoBeneficiario boBenef = new BoBeneficiario();
+                List<Beneficiario> listaBenef = boBenef.Consultar(cliente.Id);
+
+                model.Beneficiarios = new List<BeneficiarioModel>();
+
+                foreach (var item in listaBenef)
+                {
+                    model.Beneficiarios.Add(new BeneficiarioModel()
+                    {
+                        CPF = item.CPF,
+                        Nome = item.Nome,
+                        IdCliente = item.IdCliente,
+                        Id = item.Id
+                    });
+                }
             }
 
             return View(model);
@@ -138,7 +208,6 @@ namespace WebAtividadeEntrevista.Controllers
 
                 List<Cliente> clientes = new BoCliente().Pesquisa(jtStartIndex, jtPageSize, campo, crescente.Equals("ASC", StringComparison.InvariantCultureIgnoreCase), out qtd);
 
-                //Return result to jTable
                 return Json(new { Result = "OK", Records = clientes, TotalRecordCount = qtd });
             }
             catch (Exception ex)
